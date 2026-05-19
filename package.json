@@ -1,0 +1,15 @@
+{
+  "name": "stock-tracker-bot",
+  "version": "1.0.0",
+  "description": "Discord Stock Tracker Bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "deploy": "node deploy.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.3"
+  }
+}

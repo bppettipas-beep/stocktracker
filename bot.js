@@ -62,7 +62,7 @@ const client = new Client({
 const addSessions = new Map();
 
 client.once(Events.ClientReady, () => {
-    console.log(`✅  Online as ${client.user.tag}`);
+    console.log(`✅  Online as ${client.user.tag} | ${new Date().toISOString()}`);
 });
 
 // ─── Channel watcher ─────────────────────────────────────────────────────────

@@ -55,7 +55,7 @@ function buildPanel(stock, note = null) {
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildChannels],
+    intents: [GatewayIntentBits.Guilds],
 });
 
 // userId → partial stock config waiting for category selection

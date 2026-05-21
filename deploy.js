@@ -16,6 +16,9 @@ const commands = [
                .setDescription('New emoji — omit to remove the current emoji')
                .setRequired(false)
         ),
+    new SlashCommandBuilder()
+        .setName('stockpanelhere')
+        .setDescription('Post the live stock panel in this channel — Admin only'),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);

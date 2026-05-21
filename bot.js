@@ -107,9 +107,10 @@ client.on(Events.ChannelDelete, async (channel) => {
 client.on(Events.InteractionCreate, async (interaction) => {
     try {
         if (interaction.isChatInputCommand()) {
-            if (interaction.commandName === 'stockadd')     return await cmdStockAdd(interaction);
-            if (interaction.commandName === 'stockset')     return await cmdStockSet(interaction);
+            if (interaction.commandName === 'stockadd')      return await cmdStockAdd(interaction);
+            if (interaction.commandName === 'stockset')      return await cmdStockSet(interaction);
             if (interaction.commandName === 'setstockemoji') return await cmdSetStockEmoji(interaction);
+            if (interaction.commandName === 'stockpanelhere') return await cmdStockPanelHere(interaction);
         }
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'modal_stockadd')    return await modalStockAdd(interaction);
@@ -119,6 +120,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (interaction.customId === 'sa_category') return await selectCategory(interaction);
             if (interaction.customId === 'ss_pick')     return await selectStock(interaction);
             if (interaction.customId === 'se_pick')     return await selectStockEmoji(interaction);
+            if (interaction.customId === 'sp_pick')     return await selectStockPanel(interaction);
         }
         if (interaction.isButton()) {
             if (interaction.customId.startsWith('ss_')) return await buttonStockSet(interaction);
@@ -349,6 +351,57 @@ async function modalStockSet(interaction) {
 
     await interaction.deferUpdate();
     await interaction.editReply({ embeds: [embed], components: [btnRow] });
+}
+
+// ─── /stockpanelhere ─────────────────────────────────────────────────────────
+
+async function cmdStockPanelHere(interaction) {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: '❌ Administrator permission required.', ephemeral: true });
+    }
+
+    const stocks = await db.getStocks(interaction.guild.id);
+    if (!stocks.length) return interaction.reply({ content: '❌ No stocks configured. Use `/stockadd` first.', ephemeral: true });
+
+    if (stocks.length === 1) return postStockPanel(interaction, stocks[0]);
+
+    const select = new StringSelectMenuBuilder()
+        .setCustomId('sp_pick')
+        .setPlaceholder('Select a stock…')
+        .addOptions(
+            stocks.slice(0, 25).map(s => ({
+                label:       `${s.emoji ? s.emoji + '  ' : ''}${s.name}`,
+                value:       s.id,
+                description: `Value: ${formatVal(s.value)}`,
+            }))
+        );
+
+    await interaction.reply({
+        embeds: [
+            new EmbedBuilder()
+                .setTitle('📊  Post Stock Panel')
+                .setDescription('Select which stock to post here:')
+                .setColor(0x5865f2),
+        ],
+        components: [row(select)],
+        ephemeral: true,
+    });
+}
+
+async function selectStockPanel(interaction) {
+    const stocks = await db.getStocks(interaction.guild.id);
+    const stock  = stocks.find(s => s.id === interaction.values[0]);
+    if (!stock) return interaction.update({ content: '❌ Stock not found.', embeds: [], components: [] });
+
+    await interaction.update({ content: '✅ Panel posted!', embeds: [], components: [] });
+    await postStockPanel(null, stock, interaction.channel);
+}
+
+async function postStockPanel(interaction, stock, channel = null) {
+    const target = channel ?? interaction.channel;
+    const msg = await target.send({ embeds: [buildChannelEmbed(stock)] });
+    await db.saveStockMessage(stock.id, target.id, msg.id, target.guild.id);
+    if (interaction) await interaction.reply({ content: '✅ Panel posted!', ephemeral: true });
 }
 
 // ─── /setstockemoji ──────────────────────────────────────────────────────────

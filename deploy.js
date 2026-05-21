@@ -8,6 +8,14 @@ const commands = [
     new SlashCommandBuilder()
         .setName('stockset')
         .setDescription('Manage an existing stock value — Admin only'),
+    new SlashCommandBuilder()
+        .setName('setstockemoji')
+        .setDescription('Set or remove the emoji for a stock — Admin only')
+        .addStringOption(opt =>
+            opt.setName('emoji')
+               .setDescription('New emoji — omit to remove the current emoji')
+               .setRequired(false)
+        ),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);

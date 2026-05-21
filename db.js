@@ -19,6 +19,14 @@ async function init() {
             delay_seconds INTEGER NOT NULL
         )
     `);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS stock_messages (
+            channel_id TEXT PRIMARY KEY,
+            stock_id   TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            guild_id   TEXT NOT NULL
+        )
+    `);
     console.log('[DB] Ready');
 }
 
@@ -66,4 +74,28 @@ function toStock(row) {
     };
 }
 
-module.exports = { init, getStocks, upsertStock, updateStockValue };
+async function saveStockMessage(stockId, channelId, messageId, guildId) {
+    await pool.query(`
+        INSERT INTO stock_messages (channel_id, stock_id, message_id, guild_id)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (channel_id) DO UPDATE SET message_id = EXCLUDED.message_id
+    `, [channelId, stockId, messageId, guildId]);
+}
+
+async function getStockMessages(stockId) {
+    const { rows } = await pool.query(
+        'SELECT channel_id, message_id FROM stock_messages WHERE stock_id = $1',
+        [stockId]
+    );
+    return rows.map(r => ({ channelId: r.channel_id, messageId: r.message_id }));
+}
+
+async function deleteStockMessage(channelId) {
+    await pool.query('DELETE FROM stock_messages WHERE channel_id = $1', [channelId]);
+}
+
+async function updateStockEmoji(id, emoji) {
+    await pool.query('UPDATE stocks SET emoji = $1 WHERE id = $2', [emoji ?? null, id]);
+}
+
+module.exports = { init, getStocks, upsertStock, updateStockValue, saveStockMessage, getStockMessages, deleteStockMessage, updateStockEmoji };

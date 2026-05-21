@@ -7,6 +7,19 @@ const {
 } = require('discord.js');
 const db = require('./db');
 
+async function pushLiveEmbeds(stock) {
+    const tracked = await db.getStockMessages(stock.id);
+    for (const { channelId, messageId } of tracked) {
+        try {
+            const channel = await client.channels.fetch(channelId);
+            const message = await channel.messages.fetch(messageId);
+            await message.edit({ embeds: [buildChannelEmbed(stock)] });
+        } catch {
+            await db.deleteStockMessage(channelId).catch(() => {});
+        }
+    }
+}
+
 // ─── Embed builders ──────────────────────────────────────────────────────────
 
 function formatVal(n) {
@@ -58,8 +71,8 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds],
 });
 
-// userId → partial stock config waiting for category selection
-const addSessions = new Map();
+const addSessions   = new Map(); // userId → partial stock config waiting for category selection
+const emojiSessions = new Map(); // userId → emoji string waiting for stock selection
 
 client.once(Events.ClientReady, () => {
     console.log(`✅  Online as ${client.user.tag} | ${new Date().toISOString()}`);
@@ -76,13 +89,17 @@ client.on(Events.ChannelCreate, async (channel) => {
 
     setTimeout(async () => {
         try {
-            // Re-fetch so the embed always shows the latest value
             const fresh = (await db.getStocks(channel.guild.id)).find(s => s.id === stock.id) ?? stock;
-            await channel.send({ embeds: [buildChannelEmbed(fresh)] });
+            const msg = await channel.send({ embeds: [buildChannelEmbed(fresh)] });
+            await db.saveStockMessage(fresh.id, channel.id, msg.id, channel.guild.id);
         } catch (err) {
             console.error(`[StockTracker] Could not send to #${channel.name}:`, err.message);
         }
     }, stock.delaySeconds * 1000);
+});
+
+client.on(Events.ChannelDelete, async (channel) => {
+    await db.deleteStockMessage(channel.id).catch(() => {});
 });
 
 // ─── Interaction router ──────────────────────────────────────────────────────
@@ -90,8 +107,9 @@ client.on(Events.ChannelCreate, async (channel) => {
 client.on(Events.InteractionCreate, async (interaction) => {
     try {
         if (interaction.isChatInputCommand()) {
-            if (interaction.commandName === 'stockadd') return await cmdStockAdd(interaction);
-            if (interaction.commandName === 'stockset') return await cmdStockSet(interaction);
+            if (interaction.commandName === 'stockadd')     return await cmdStockAdd(interaction);
+            if (interaction.commandName === 'stockset')     return await cmdStockSet(interaction);
+            if (interaction.commandName === 'setstockemoji') return await cmdSetStockEmoji(interaction);
         }
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'modal_stockadd')    return await modalStockAdd(interaction);
@@ -100,6 +118,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (interaction.isStringSelectMenu()) {
             if (interaction.customId === 'sa_category') return await selectCategory(interaction);
             if (interaction.customId === 'ss_pick')     return await selectStock(interaction);
+            if (interaction.customId === 'se_pick')     return await selectStockEmoji(interaction);
         }
         if (interaction.isButton()) {
             if (interaction.customId.startsWith('ss_')) return await buttonStockSet(interaction);
@@ -279,6 +298,7 @@ async function buttonStockSet(interaction) {
         await db.updateStockValue(stockId, stock.initialValue);
         stock.value = stock.initialValue;
 
+        pushLiveEmbeds(stock).catch(() => {});
         const { embed, btnRow } = buildPanel(stock, `🔄 Reset to starting value: \`${formatVal(stock.value)}\``);
         return interaction.update({ embeds: [embed], components: [btnRow] });
     }
@@ -320,14 +340,81 @@ async function modalStockSet(interaction) {
 
     await db.updateStockValue(stockId, stock.value);
 
+    pushLiveEmbeds(stock).catch(() => {});
+
     const symbol = { add: '➕', sub: '➖', mul: '✖️', div: '➗' }[op];
     const note   = `${symbol} \`${formatVal(before)}\` ${symbol} \`${operand}\` → \`${formatVal(stock.value)}\``;
 
     const { embed, btnRow } = buildPanel(stock, note);
 
-    // deferUpdate lets us edit the original ephemeral panel in-place
     await interaction.deferUpdate();
     await interaction.editReply({ embeds: [embed], components: [btnRow] });
+}
+
+// ─── /setstockemoji ──────────────────────────────────────────────────────────
+
+async function cmdSetStockEmoji(interaction) {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: '❌ Administrator permission required.', ephemeral: true });
+    }
+
+    const emoji  = interaction.options.getString('emoji')?.trim() || null;
+    const stocks = await db.getStocks(interaction.guild.id);
+    if (!stocks.length) return interaction.reply({ content: '❌ No stocks configured. Use `/stockadd` first.', ephemeral: true });
+
+    if (stocks.length === 1) return applyStockEmoji(interaction, stocks[0], emoji, false);
+
+    emojiSessions.set(interaction.user.id, emoji);
+
+    const select = new StringSelectMenuBuilder()
+        .setCustomId('se_pick')
+        .setPlaceholder('Select a stock…')
+        .addOptions(
+            stocks.slice(0, 25).map(s => ({
+                label:       `${s.emoji ? s.emoji + '  ' : ''}${s.name}`,
+                value:       s.id,
+                description: `Current emoji: ${s.emoji ?? 'none'}`,
+            }))
+        );
+
+    await interaction.reply({
+        embeds: [
+            new EmbedBuilder()
+                .setTitle('🎨  Set Stock Emoji')
+                .setDescription(emoji ? `Which stock should use **${emoji}**?` : 'Which stock should have its emoji removed?')
+                .setColor(0x5865f2),
+        ],
+        components: [row(select)],
+        ephemeral: true,
+    });
+}
+
+async function selectStockEmoji(interaction) {
+    const emoji = emojiSessions.get(interaction.user.id) ?? null;
+    emojiSessions.delete(interaction.user.id);
+
+    const stocks = await db.getStocks(interaction.guild.id);
+    const stock  = stocks.find(s => s.id === interaction.values[0]);
+    if (!stock) return interaction.update({ content: '❌ Stock not found.', embeds: [], components: [] });
+
+    await applyStockEmoji(interaction, stock, emoji, true);
+}
+
+async function applyStockEmoji(interaction, stock, emoji, isUpdate) {
+    await db.updateStockEmoji(stock.id, emoji);
+    stock.emoji = emoji;
+
+    pushLiveEmbeds(stock).catch(() => {});
+
+    const displayName = emoji ? `${emoji}  ${stock.name}` : stock.name;
+    const embed = new EmbedBuilder()
+        .setTitle('✅  Emoji Updated')
+        .setDescription(emoji ? `**${displayName}** emoji set to ${emoji}.` : `Emoji removed from **${stock.name}**.`)
+        .setColor(0x2ecc71)
+        .setTimestamp();
+
+    if (isUpdate) await interaction.update({ embeds: [embed], components: [] });
+    else await interaction.reply({ embeds: [embed], components: [], ephemeral: true });
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────

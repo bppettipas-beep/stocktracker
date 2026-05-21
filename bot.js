@@ -30,7 +30,7 @@ function buildChannelEmbed(stock) {
     const title = stock.emoji ? `${stock.emoji}  ${stock.name}` : stock.name;
     return new EmbedBuilder()
         .setTitle(`📈  ${title}`)
-        .setDescription(`### Current Value\n\`\`\`\n${formatVal(stock.value)}\n\`\`\``)
+        .setDescription(`### Current Stock\n\`\`\`\n${formatVal(stock.value)}\n\`\`\``)
         .setColor(stock.value >= 0 ? 0x2ecc71 : 0xe74c3c)
         .setFooter({ text: '📊 Stock Tracker' })
         .setTimestamp();
